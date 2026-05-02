@@ -1,7 +1,5 @@
 "use client";
 
-// @ts-nocheck
-
 import React, { useState, useEffect, useMemo } from "react";
 import {
   TrendingUp,
@@ -12,6 +10,66 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
 } from "lucide-react";
+
+type MonthData = {
+  trzbaCZ: number;
+  trzbaSK: number;
+  vratky: number;
+  cogs: number;
+  logistika: number;
+  metaAds: number;
+  googleAds: number;
+  sklik: number;
+  tiktokAds: number;
+  sluzby: number;
+  fixni: number;
+};
+
+type Rates = {
+  dphCZ: number;
+  dphSK: number;
+  dphVstup: number;
+};
+
+type CalcResult = {
+  trzbaNetto: number;
+  marketing: number;
+  kp: number;
+  kpMarze: number;
+  provozHV: number;
+  outDPH: number;
+  inDPH: number;
+  netDPH: number;
+  cash: number;
+};
+
+type YearTotals = CalcResult & {
+  count: number;
+};
+
+type InputField = {
+  field: keyof MonthData;
+  label: string;
+  tax: string;
+  taxTone: "zinc" | "sky";
+  neg?: boolean;
+};
+
+type InputGroup = {
+  section: string;
+  tone: "emerald" | "orange" | "amber" | "rose";
+  items: InputField[];
+};
+
+type RowProps = {
+  label: string;
+  value: string;
+  bold?: boolean;
+  muted?: boolean;
+  small?: boolean;
+  accent?: "emerald" | "rose";
+  icon?: React.ReactNode;
+};
 
 const MONTHS = [
   { idx: 1, label: "Leden", short: "Led" },
@@ -28,7 +86,7 @@ const MONTHS = [
   { idx: 12, label: "Prosinec", short: "Pro" },
 ];
 
-const EMPTY = {
+const EMPTY: MonthData = {
   trzbaCZ: 0,
   trzbaSK: 0,
   vratky: 0,
@@ -42,7 +100,7 @@ const EMPTY = {
   fixni: 0,
 };
 
-const DEFAULT_RATES = {
+const DEFAULT_RATES: Rates = {
   dphCZ: 12,
   dphSK: 19,
   dphVstup: 21,
@@ -53,12 +111,12 @@ const MONO = "'JetBrains Mono', ui-monospace, monospace";
 const UI = "'Inter', system-ui, sans-serif";
 
 export default function FitMarCalc() {
-  const [year, setYear] = useState(2026);
-  const [selectedMonth, setSelectedMonth] = useState(1);
-  const [data, setData] = useState({});
-  const [rates, setRates] = useState(DEFAULT_RATES);
-  const [showSettings, setShowSettings] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const [year, setYear] = useState<number>(2026);
+  const [selectedMonth, setSelectedMonth] = useState<number>(1);
+  const [data, setData] = useState<Record<number, MonthData>>({});
+  const [rates, setRates] = useState<Rates>(DEFAULT_RATES);
+  const [showSettings, setShowSettings] = useState<boolean>(false);
+  const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
     setSelectedMonth(new Date().getMonth() + 1);
@@ -66,18 +124,23 @@ export default function FitMarCalc() {
 
   useEffect(() => {
     try {
-      const savedData = localStorage.getItem(`fitmar:${year}`);
+      const savedData = window.localStorage.getItem(`fitmar:${year}`);
       setData(savedData ? JSON.parse(savedData) : {});
-    } catch (e) {
+    } catch {
       setData({});
     }
 
     try {
-      const savedRates = localStorage.getItem("fitmar:rates");
+      const savedRates = window.localStorage.getItem("fitmar:rates");
       if (savedRates) {
-        setRates(JSON.parse(savedRates));
+        const parsedRates = JSON.parse(savedRates);
+        setRates({
+          dphCZ: Number(parsedRates.dphCZ) || DEFAULT_RATES.dphCZ,
+          dphSK: Number(parsedRates.dphSK) || DEFAULT_RATES.dphSK,
+          dphVstup: Number(parsedRates.dphVstup) || DEFAULT_RATES.dphVstup,
+        });
       }
-    } catch (e) {}
+    } catch {}
 
     setLoading(false);
   }, [year]);
@@ -85,32 +148,32 @@ export default function FitMarCalc() {
   useEffect(() => {
     if (loading) return;
 
-    const t = setTimeout(() => {
+    const timer = window.setTimeout(() => {
       try {
-        localStorage.setItem(`fitmar:${year}`, JSON.stringify(data));
-      } catch (e) {}
+        window.localStorage.setItem(`fitmar:${year}`, JSON.stringify(data));
+      } catch {}
     }, 300);
 
-    return () => clearTimeout(t);
+    return () => window.clearTimeout(timer);
   }, [data, year, loading]);
 
   useEffect(() => {
     if (loading) return;
 
     try {
-      localStorage.setItem("fitmar:rates", JSON.stringify(rates));
-    } catch (e) {}
+      window.localStorage.setItem("fitmar:rates", JSON.stringify(rates));
+    } catch {}
   }, [rates, loading]);
 
-  const getMonth = (m) => {
-    return data[m] || { ...EMPTY };
+  const getMonth = (monthNumber: number): MonthData => {
+    return data[monthNumber] || { ...EMPTY };
   };
 
-  const updateValue = (field, raw) => {
+  const updateValue = (field: keyof MonthData, raw: string) => {
     const num =
       raw === "" || raw === "-"
         ? 0
-        : parseFloat(String(raw).replace(",", ".")) || 0;
+        : Number.parseFloat(String(raw).replace(",", ".")) || 0;
 
     setData((prev) => ({
       ...prev,
@@ -122,16 +185,20 @@ export default function FitMarCalc() {
   };
 
   const resetMonth = () => {
-    if (confirm(`Vymazat data pro ${MONTHS[selectedMonth - 1].label} ${year}?`)) {
+    const currentMonth = MONTHS[selectedMonth - 1];
+
+    if (!currentMonth) return;
+
+    if (window.confirm(`Vymazat data pro ${currentMonth.label} ${year}?`)) {
       setData((prev) => {
-        const n = { ...prev };
-        delete n[selectedMonth];
-        return n;
+        const next = { ...prev };
+        delete next[selectedMonth];
+        return next;
       });
     }
   };
 
-  const calc = (m = EMPTY) => {
+  const calc = (m: MonthData = EMPTY): CalcResult => {
     const trzbaCZ = m.trzbaCZ || 0;
     const trzbaSK = m.trzbaSK || 0;
     const vratky = m.vratky || 0;
@@ -178,48 +245,78 @@ export default function FitMarCalc() {
   const month = getMonth(selectedMonth);
   const r = calc(month);
 
-  const yearTotals = useMemo(() => {
-    const filledMonths = Object.keys(data).filter((k) => {
-      const m = data[k];
-      return m && Object.values(m).some((v) => Number(v) !== 0);
+  const yearTotals = useMemo<YearTotals>(() => {
+    const filledMonths = Object.keys(data)
+      .map(Number)
+      .filter((monthKey) => {
+        const monthData = data[monthKey];
+        return (
+          monthData &&
+          Object.values(monthData).some((value) => Number(value) !== 0)
+        );
+      });
+
+    const totals: YearTotals = {
+      trzbaNetto: 0,
+      marketing: 0,
+      kp: 0,
+      kpMarze: 0,
+      provozHV: 0,
+      outDPH: 0,
+      inDPH: 0,
+      netDPH: 0,
+      cash: 0,
+      count: filledMonths.length,
+    };
+
+    filledMonths.forEach((monthKey) => {
+      const c = calc(data[monthKey]);
+
+      totals.trzbaNetto += c.trzbaNetto;
+      totals.marketing += c.marketing;
+      totals.kp += c.kp;
+      totals.provozHV += c.provozHV;
+      totals.outDPH += c.outDPH;
+      totals.inDPH += c.inDPH;
+      totals.netDPH += c.netDPH;
+      totals.cash += c.cash;
     });
 
-    const agg = filledMonths.reduce((acc, k) => {
-      const c = calc(data[k]);
-      Object.keys(c).forEach((key) => {
-        acc[key] = (acc[key] || 0) + c[key];
-      });
-      return acc;
-    }, {});
+    totals.kpMarze =
+      totals.trzbaNetto > 0 ? totals.kp / totals.trzbaNetto : 0;
 
-    if (agg.trzbaNetto > 0) {
-      agg.kpMarze = agg.kp / agg.trzbaNetto;
-    }
-
-    agg.count = filledMonths.length;
-
-    return agg;
+    return totals;
   }, [data, rates]);
 
-  const fmt = (n) => {
-    if (n === 0 || isNaN(n) || n === undefined || n === null) return "0";
-    const v = Math.round(n);
-    return v.toLocaleString("cs-CZ").replace(/[\u00A0\u202F]/g, " ");
+  const fmt = (n: number | undefined | null): string => {
+    if (n === 0 || Number.isNaN(n) || n === undefined || n === null) {
+      return "0";
+    }
+
+    const value = Math.round(n);
+    return value.toLocaleString("cs-CZ").replace(/[\u00A0\u202F]/g, " ");
   };
 
-  const fmtKc = (n) => `${fmt(n)} Kč`;
+  const fmtKc = (n: number | undefined | null): string => `${fmt(n)} Kč`;
 
-  const fmtPct = (n) => {
-    if (isNaN(n) || n === undefined || n === null) return "0,0 %";
+  const fmtPct = (n: number | undefined | null): string => {
+    if (Number.isNaN(n) || n === undefined || n === null) {
+      return "0,0 %";
+    }
+
     return (n * 100).toFixed(1).replace(".", ",") + " %";
   };
 
-  const isMonthFilled = (m) => {
-    const d = data[m];
-    return d && Object.values(d).some((v) => Number(v) !== 0);
+  const isMonthFilled = (monthNumber: number): boolean => {
+    const monthData = data[monthNumber];
+
+    return Boolean(
+      monthData &&
+        Object.values(monthData).some((value) => Number(value) !== 0)
+    );
   };
 
-  const inputs = [
+  const inputs: InputGroup[] = [
     {
       section: "Příjmy",
       tone: "emerald",
@@ -313,12 +410,14 @@ export default function FitMarCalc() {
     },
   ];
 
-  const toneClasses = {
+  const toneClasses: Record<InputGroup["tone"], string> = {
     emerald: "text-emerald-700 border-emerald-200",
     orange: "text-orange-700 border-orange-200",
     amber: "text-amber-700 border-amber-200",
     rose: "text-rose-700 border-rose-200",
   };
+
+  const currentMonthLabel = MONTHS[selectedMonth - 1]?.label || "";
 
   return (
     <div
@@ -395,19 +494,19 @@ export default function FitMarCalc() {
           <div className="flex items-center gap-2">
             <select
               value={year}
-              onChange={(e) => setYear(parseInt(e.target.value, 10))}
+              onChange={(event) => setYear(Number.parseInt(event.target.value, 10))}
               className="px-3 py-2 text-sm bg-white border border-stone-300 hover:border-stone-500 transition"
               style={{ fontFamily: MONO }}
             >
-              {[2024, 2025, 2026, 2027].map((y) => (
-                <option key={y} value={y}>
-                  {y}
+              {[2024, 2025, 2026, 2027].map((yearOption) => (
+                <option key={yearOption} value={yearOption}>
+                  {yearOption}
                 </option>
               ))}
             </select>
 
             <button
-              onClick={() => setShowSettings(!showSettings)}
+              onClick={() => setShowSettings((prev) => !prev)}
               className="p-2 bg-white border border-stone-300 hover:border-stone-500 transition"
               title="DPH sazby"
               type="button"
@@ -428,9 +527,9 @@ export default function FitMarCalc() {
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {[
-                { key: "dphCZ", label: "Výstup ČR" },
-                { key: "dphSK", label: "Výstup SK / OSS" },
-                { key: "dphVstup", label: "Vstup" },
+                { key: "dphCZ" as keyof Rates, label: "Výstup ČR" },
+                { key: "dphSK" as keyof Rates, label: "Výstup SK / OSS" },
+                { key: "dphVstup" as keyof Rates, label: "Vstup" },
               ].map(({ key, label }) => (
                 <label key={key} className="block">
                   <span className="text-xs text-stone-600 block mb-1">
@@ -442,11 +541,11 @@ export default function FitMarCalc() {
                       type="number"
                       step="0.5"
                       value={rates[key]}
-                      onChange={(e) =>
-                        setRates({
-                          ...rates,
-                          [key]: parseFloat(e.target.value) || 0,
-                        })
+                      onChange={(event) =>
+                        setRates((prev) => ({
+                          ...prev,
+                          [key]: Number.parseFloat(event.target.value) || 0,
+                        }))
                       }
                       className="w-full px-3 py-2 bg-transparent num-input text-right"
                       style={{ fontFamily: MONO }}
@@ -461,17 +560,17 @@ export default function FitMarCalc() {
         )}
 
         <div className="mb-8 grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-12 gap-1 bg-white border border-stone-300 p-1">
-          {MONTHS.map((m) => (
+          {MONTHS.map((monthItem) => (
             <button
-              key={m.idx}
-              onClick={() => setSelectedMonth(m.idx)}
+              key={monthItem.idx}
+              onClick={() => setSelectedMonth(monthItem.idx)}
               className={`month-pill relative py-3 text-xs uppercase tracking-wider transition ${
-                selectedMonth === m.idx ? "active" : ""
-              } ${isMonthFilled(m.idx) ? "filled" : ""}`}
+                selectedMonth === monthItem.idx ? "active" : ""
+              } ${isMonthFilled(monthItem.idx) ? "filled" : ""}`}
               style={{ fontFamily: MONO, fontWeight: 500 }}
               type="button"
             >
-              {m.short}
+              {monthItem.short}
             </button>
           ))}
         </div>
@@ -486,7 +585,7 @@ export default function FitMarCalc() {
                   fontSize: "1.5rem",
                 }}
               >
-                {MONTHS[selectedMonth - 1].label} {year}
+                {currentMonthLabel} {year}
               </h2>
 
               <button
@@ -502,9 +601,7 @@ export default function FitMarCalc() {
             {inputs.map((group) => (
               <section
                 key={group.section}
-                className={`bg-white border-l-2 ${
-                  toneClasses[group.tone]
-                } border-y border-r border-stone-200`}
+                className={`bg-white border-l-2 ${toneClasses[group.tone]} border-y border-r border-stone-200`}
               >
                 <header className={`px-5 pt-4 pb-2 ${toneClasses[group.tone]}`}>
                   <h3 className="text-xs uppercase tracking-[0.15em] font-semibold">
@@ -539,7 +636,9 @@ export default function FitMarCalc() {
                           type="number"
                           inputMode="decimal"
                           value={month[item.field] || ""}
-                          onChange={(e) => updateValue(item.field, e.target.value)}
+                          onChange={(event) =>
+                            updateValue(item.field, event.target.value)
+                          }
                           placeholder="0"
                           className="num-input flex-1 px-2 py-2 text-right bg-transparent min-w-0"
                           style={{
@@ -720,17 +819,17 @@ export default function FitMarCalc() {
               </thead>
 
               <tbody className="divide-y divide-stone-100">
-                {MONTHS.map((m) => {
-                  const monthData = data[m.idx] || EMPTY;
+                {MONTHS.map((monthItem) => {
+                  const monthData = data[monthItem.idx] || EMPTY;
                   const c = calc(monthData);
-                  const filled = isMonthFilled(m.idx);
+                  const filled = isMonthFilled(monthItem.idx);
 
                   return (
                     <tr
-                      key={m.idx}
-                      onClick={() => setSelectedMonth(m.idx)}
+                      key={monthItem.idx}
+                      onClick={() => setSelectedMonth(monthItem.idx)}
                       className={`cursor-pointer transition ${
-                        selectedMonth === m.idx
+                        selectedMonth === monthItem.idx
                           ? "bg-stone-50"
                           : "hover:bg-stone-50/50"
                       } ${!filled ? "text-stone-300" : ""}`}
@@ -739,8 +838,9 @@ export default function FitMarCalc() {
                         className="px-4 py-2.5 font-medium"
                         style={{ fontFamily: UI }}
                       >
-                        {m.label}
-                        {selectedMonth === m.idx && (
+                        {monthItem.label}
+
+                        {selectedMonth === monthItem.idx && (
                           <span className="ml-2 text-[10px] uppercase text-stone-400">
                             aktuální
                           </span>
@@ -784,7 +884,9 @@ export default function FitMarCalc() {
                             : ""
                         }`}
                       >
-                        {filled ? `${c.netDPH >= 0 ? "+" : ""}${fmtKc(c.netDPH)}` : "—"}
+                        {filled
+                          ? `${c.netDPH >= 0 ? "+" : ""}${fmtKc(c.netDPH)}`
+                          : "—"}
                       </td>
 
                       <td
@@ -819,7 +921,9 @@ export default function FitMarCalc() {
 
                     <td
                       className={`px-4 py-3 text-right tabular-nums font-semibold ${
-                        yearTotals.kp < 0 ? "text-rose-300" : "text-emerald-300"
+                        yearTotals.kp < 0
+                          ? "text-rose-300"
+                          : "text-emerald-300"
                       }`}
                     >
                       {fmtKc(yearTotals.kp)}
@@ -884,7 +988,15 @@ export default function FitMarCalc() {
   );
 }
 
-function Row({ label, value, bold, muted, small, accent, icon }) {
+function Row({
+  label,
+  value,
+  bold = false,
+  muted = false,
+  small = false,
+  accent,
+  icon,
+}: RowProps) {
   const accentColor =
     accent === "emerald"
       ? "text-emerald-700"
