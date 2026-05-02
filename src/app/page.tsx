@@ -1,3 +1,4 @@
+"use client";
 import React, { useState, useEffect, useMemo } from 'react';
 import { TrendingUp, TrendingDown, RotateCcw, Info, Settings, ArrowDownToLine, ArrowUpFromLine } from 'lucide-react';
 
