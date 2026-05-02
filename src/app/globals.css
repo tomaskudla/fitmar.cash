@@ -1,0 +1,42 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+
+html, body {
+  background-color: #FAF7F2;
+  color: #0A0E1A;
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type="number"] {
+  -moz-appearance: textfield;
+}
+
+.num-input:focus {
+  outline: 2px solid #0A0E1A;
+  outline-offset: -2px;
+  background: #fff;
+}
+
+.month-pill:hover { background: rgba(10,14,26,0.04); }
+.month-pill.active { background: #0A0E1A; color: #FAF7F2; }
+.month-pill.filled::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: #059669;
+}
+.month-pill.active.filled::after { background: #6EE7B7; }
