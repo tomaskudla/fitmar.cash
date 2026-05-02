@@ -4,71 +4,132 @@ import React, { useState, useEffect, useMemo } from "react";
 import {
   TrendingUp,
   TrendingDown,
+  Plus,
+  X,
+  Edit3,
+  Check,
   RotateCcw,
-  Info,
-  Settings,
   ArrowDownToLine,
   ArrowUpFromLine,
+  Zap,
+  Activity,
+  Trash2,
+  AlertTriangle,
 } from "lucide-react";
 
-type MonthData = {
-  trzbaCZ: number;
-  trzbaSK: number;
-  vratky: number;
+type CategoryId =
+  | "income"
+  | "refunds"
+  | "cogs"
+  | "logistics"
+  | "marketing"
+  | "fixed";
+
+type VatTypeId =
+  | "input"
+  | "output_cz"
+  | "output_sk"
+  | "reverse_charge"
+  | "none";
+
+type MonthItem = {
+  id: string;
+  name: string;
+  category: CategoryId;
+  vatType: VatTypeId;
+  vatRate: number;
+};
+
+type Template = {
+  items: MonthItem[];
+};
+
+type MonthlyValues = Record<string, number>;
+type MonthlyData = Record<number, MonthlyValues>;
+
+type Category = {
+  id: CategoryId;
+  label: string;
+  accent: string;
+  desc: string;
+};
+
+type VatType = {
+  id: VatTypeId;
+  label: string;
+  short: string;
+  desc: string;
+  color: string;
+};
+
+type Totals = {
+  income: number;
+  refunds: number;
   cogs: number;
-  logistika: number;
-  metaAds: number;
-  googleAds: number;
-  sklik: number;
-  tiktokAds: number;
-  sluzby: number;
-  fixni: number;
-};
-
-type Rates = {
-  dphCZ: number;
-  dphSK: number;
-  dphVstup: number;
-};
-
-type CalcResult = {
-  trzbaNetto: number;
+  logistics: number;
   marketing: number;
+  fixed: number;
+  outputDPHCZ: number;
+  outputDPHSK: number;
+  inputDPH: number;
+  trzbaNetto: number;
+  varCosts: number;
   kp: number;
   kpMarze: number;
   provozHV: number;
-  outDPH: number;
-  inDPH: number;
+  outputDPH: number;
   netDPH: number;
   cash: number;
 };
 
-type YearTotals = CalcResult & {
+type YearTotals = Totals & {
   count: number;
 };
 
-type InputField = {
-  field: keyof MonthData;
-  label: string;
-  tax: string;
-  taxTone: "zinc" | "sky";
-  neg?: boolean;
+type CategoryPanelProps = {
+  category: Category;
+  items: MonthItem[];
+  values: MonthlyValues;
+  total: number;
+  vatTotal: number;
+  editMode: boolean;
+  onValueChange: (itemId: string, value: string) => void;
+  onAddItem: () => void;
+  onUpdateItem: (id: string, updates: Partial<MonthItem>) => void;
+  onDeleteItem: (id: string) => void;
 };
 
-type InputGroup = {
-  section: string;
-  tone: "emerald" | "orange" | "amber" | "rose";
-  items: InputField[];
+type ItemRowProps = {
+  item: MonthItem;
+  value: number;
+  editMode: boolean;
+  onValueChange: (value: string) => void;
+  onUpdate: (updates: Partial<MonthItem>) => void;
+  onDelete: () => void;
 };
 
-type RowProps = {
+type ResultsPanelProps = {
+  result: Totals;
+};
+
+type ResultRowProps = {
   label: string;
   value: string;
   bold?: boolean;
   muted?: boolean;
   small?: boolean;
-  accent?: "emerald" | "rose";
+  accent?: "cyan" | "rose";
   icon?: React.ReactNode;
+};
+
+type YearOverviewProps = {
+  template: Template;
+  monthlyData: MonthlyData;
+  year: number;
+  selectedMonth: number;
+  onSelectMonth: (month: number) => void;
+  isMonthFilled: (month: number) => boolean;
+  yearTotals: YearTotals;
 };
 
 const MONTHS = [
@@ -86,61 +147,346 @@ const MONTHS = [
   { idx: 12, label: "Prosinec", short: "Pro" },
 ];
 
-const EMPTY: MonthData = {
-  trzbaCZ: 0,
-  trzbaSK: 0,
-  vratky: 0,
-  cogs: 0,
-  logistika: 0,
-  metaAds: 0,
-  googleAds: 0,
-  sklik: 0,
-  tiktokAds: 0,
-  sluzby: 0,
-  fixni: 0,
+const CATEGORIES: Category[] = [
+  {
+    id: "income",
+    label: "Příjmy",
+    accent: "#22D3EE",
+    desc: "Tržby a další příjmy",
+  },
+  {
+    id: "refunds",
+    label: "Vratky",
+    accent: "#F472B6",
+    desc: "Vratky zákazníkům, dobropisy",
+  },
+  {
+    id: "cogs",
+    label: "COGS",
+    accent: "#3B82F6",
+    desc: "Variabilní náklady na produkt",
+  },
+  {
+    id: "logistics",
+    label: "Logistika",
+    accent: "#60A5FA",
+    desc: "Doprava, fulfillment, skladování",
+  },
+  {
+    id: "marketing",
+    label: "Marketing",
+    accent: "#A78BFA",
+    desc: "Reklama, agentury, kreativa",
+  },
+  {
+    id: "fixed",
+    label: "Fixní náklady",
+    accent: "#818CF8",
+    desc: "Mzdy, nájem, SaaS, služby",
+  },
+];
+
+const VAT_TYPES: VatType[] = [
+  {
+    id: "input",
+    label: "Vstup",
+    short: "↓",
+    desc: "Vstupní DPH",
+    color: "#22D3EE",
+  },
+  {
+    id: "output_cz",
+    label: "Výstup ČR",
+    short: "↑",
+    desc: "Výstupní DPH ČR",
+    color: "#F59E0B",
+  },
+  {
+    id: "output_sk",
+    label: "Výstup SK / OSS",
+    short: "↑",
+    desc: "Výstupní DPH SK přes OSS",
+    color: "#F472B6",
+  },
+  {
+    id: "reverse_charge",
+    label: "Reverse charge",
+    short: "RC",
+    desc: "DPH-neutrální",
+    color: "#94A3B8",
+  },
+  {
+    id: "none",
+    label: "Bez DPH",
+    short: "—",
+    desc: "Mimo DPH systém",
+    color: "#64748B",
+  },
+];
+
+const DEFAULT_TEMPLATE: Template = {
+  items: [
+    {
+      id: "i1",
+      name: "Tržba ČR (potraviny)",
+      category: "income",
+      vatType: "output_cz",
+      vatRate: 12,
+    },
+    {
+      id: "i2",
+      name: "Tržba SK / OSS",
+      category: "income",
+      vatType: "output_sk",
+      vatRate: 19,
+    },
+    {
+      id: "r1",
+      name: "Vratky ČR",
+      category: "refunds",
+      vatType: "output_cz",
+      vatRate: 12,
+    },
+    {
+      id: "c1",
+      name: "Ořechy",
+      category: "cogs",
+      vatType: "input",
+      vatRate: 12,
+    },
+    {
+      id: "c2",
+      name: "Čokoláda",
+      category: "cogs",
+      vatType: "input",
+      vatRate: 12,
+    },
+    {
+      id: "c3",
+      name: "Sklenice",
+      category: "cogs",
+      vatType: "input",
+      vatRate: 21,
+    },
+    {
+      id: "c4",
+      name: "Etikety & packaging",
+      category: "cogs",
+      vatType: "input",
+      vatRate: 21,
+    },
+    {
+      id: "l1",
+      name: "Doprava",
+      category: "logistics",
+      vatType: "input",
+      vatRate: 21,
+    },
+    {
+      id: "l2",
+      name: "Fulfillment",
+      category: "logistics",
+      vatType: "input",
+      vatRate: 21,
+    },
+    {
+      id: "m1",
+      name: "Meta Ads",
+      category: "marketing",
+      vatType: "reverse_charge",
+      vatRate: 0,
+    },
+    {
+      id: "m2",
+      name: "Google Ads",
+      category: "marketing",
+      vatType: "reverse_charge",
+      vatRate: 0,
+    },
+    {
+      id: "m3",
+      name: "Sklik (Seznam.cz)",
+      category: "marketing",
+      vatType: "input",
+      vatRate: 21,
+    },
+    {
+      id: "m4",
+      name: "TikTok Ads",
+      category: "marketing",
+      vatType: "reverse_charge",
+      vatRate: 0,
+    },
+    {
+      id: "f1",
+      name: "Mzdy & odvody",
+      category: "fixed",
+      vatType: "none",
+      vatRate: 0,
+    },
+    {
+      id: "f2",
+      name: "Nájem",
+      category: "fixed",
+      vatType: "input",
+      vatRate: 21,
+    },
+    {
+      id: "f3",
+      name: "Služby & SaaS",
+      category: "fixed",
+      vatType: "input",
+      vatRate: 21,
+    },
+  ],
 };
 
-const DEFAULT_RATES: Rates = {
-  dphCZ: 12,
-  dphSK: 19,
-  dphVstup: 21,
+const TEMPLATE_KEY = "fitmar-v2:template";
+const dataKey = (year: number) => `fitmar-v2:data:${year}`;
+
+const FONT_DISPLAY = "'Chakra Petch', 'Space Grotesk', sans-serif";
+const FONT_MONO = "'JetBrains Mono', ui-monospace, monospace";
+const FONT_UI = "'Inter', system-ui, sans-serif";
+
+const fmt = (n: number | undefined | null) => {
+  if (n === 0 || Number.isNaN(n) || n === undefined || n === null) return "0";
+  const value = Math.round(n);
+  return value.toLocaleString("cs-CZ").replace(/[\u00A0\u202F]/g, " ");
 };
 
-const DISPLAY = "'Fraunces', Georgia, serif";
-const MONO = "'JetBrains Mono', ui-monospace, monospace";
-const UI = "'Inter', system-ui, sans-serif";
+const fmtKc = (n: number | undefined | null) => `${fmt(n)} Kč`;
+
+const fmtPct = (n: number | undefined | null) => {
+  if (Number.isNaN(n) || n === undefined || n === null) return "0,0 %";
+  return (n * 100).toFixed(1).replace(".", ",") + " %";
+};
+
+const newId = () => `x${Math.random().toString(36).slice(2, 10)}`;
+
+function calculate(items: MonthItem[], values: MonthlyValues): Totals {
+  const totals: Totals = {
+    income: 0,
+    refunds: 0,
+    cogs: 0,
+    logistics: 0,
+    marketing: 0,
+    fixed: 0,
+    outputDPHCZ: 0,
+    outputDPHSK: 0,
+    inputDPH: 0,
+    trzbaNetto: 0,
+    varCosts: 0,
+    kp: 0,
+    kpMarze: 0,
+    provozHV: 0,
+    outputDPH: 0,
+    netDPH: 0,
+    cash: 0,
+  };
+
+  items.forEach((item) => {
+    const amount = Number(values[item.id] || 0);
+    if (amount === 0) return;
+
+    totals[item.category] += amount;
+
+    const vat = amount * ((item.vatRate || 0) / 100);
+
+    if (item.vatType === "input") {
+      totals.inputDPH += vat;
+    }
+
+    if (item.vatType === "output_cz") {
+      if (item.category === "refunds") {
+        totals.outputDPHCZ -= vat;
+      } else {
+        totals.outputDPHCZ += vat;
+      }
+    }
+
+    if (item.vatType === "output_sk") {
+      if (item.category === "refunds") {
+        totals.outputDPHSK -= vat;
+      } else {
+        totals.outputDPHSK += vat;
+      }
+    }
+  });
+
+  totals.trzbaNetto = totals.income - totals.refunds;
+  totals.varCosts = totals.cogs + totals.logistics + totals.marketing;
+  totals.kp = totals.trzbaNetto - totals.varCosts;
+  totals.kpMarze = totals.trzbaNetto > 0 ? totals.kp / totals.trzbaNetto : 0;
+  totals.provozHV = totals.kp - totals.fixed;
+  totals.outputDPH = totals.outputDPHCZ + totals.outputDPHSK;
+  totals.netDPH = totals.inputDPH - totals.outputDPH;
+  totals.cash = totals.provozHV + totals.netDPH;
+
+  return totals;
+}
+
+function normalizeTemplate(value: unknown): Template {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !("items" in value) ||
+    !Array.isArray((value as Template).items)
+  ) {
+    return DEFAULT_TEMPLATE;
+  }
+
+  const parsed = value as Template;
+
+  const items = parsed.items
+    .filter((item) => item && typeof item === "object")
+    .map((item) => ({
+      id: String(item.id || newId()),
+      name: String(item.name || "Položka"),
+      category: CATEGORIES.some((cat) => cat.id === item.category)
+        ? item.category
+        : "fixed",
+      vatType: VAT_TYPES.some((vat) => vat.id === item.vatType)
+        ? item.vatType
+        : "none",
+      vatRate: Number(item.vatRate) || 0,
+    }));
+
+  return { items };
+}
 
 export default function FitMarCalc() {
+  const [template, setTemplate] = useState<Template>(DEFAULT_TEMPLATE);
+  const [monthlyData, setMonthlyData] = useState<MonthlyData>({});
   const [year, setYear] = useState<number>(2026);
   const [selectedMonth, setSelectedMonth] = useState<number>(1);
-  const [data, setData] = useState<Record<number, MonthData>>({});
-  const [rates, setRates] = useState<Rates>(DEFAULT_RATES);
-  const [showSettings, setShowSettings] = useState<boolean>(false);
+  const [editMode, setEditMode] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
+  const [showResetConfirm, setShowResetConfirm] = useState<boolean>(false);
 
   useEffect(() => {
     setSelectedMonth(new Date().getMonth() + 1);
   }, []);
 
   useEffect(() => {
+    setLoading(true);
+
     try {
-      const savedData = window.localStorage.getItem(`fitmar:${year}`);
-      setData(savedData ? JSON.parse(savedData) : {});
+      const savedTemplate = window.localStorage.getItem(TEMPLATE_KEY);
+      if (savedTemplate) {
+        setTemplate(normalizeTemplate(JSON.parse(savedTemplate)));
+      } else {
+        setTemplate(DEFAULT_TEMPLATE);
+      }
     } catch {
-      setData({});
+      setTemplate(DEFAULT_TEMPLATE);
     }
 
     try {
-      const savedRates = window.localStorage.getItem("fitmar:rates");
-      if (savedRates) {
-        const parsedRates = JSON.parse(savedRates);
-        setRates({
-          dphCZ: Number(parsedRates.dphCZ) || DEFAULT_RATES.dphCZ,
-          dphSK: Number(parsedRates.dphSK) || DEFAULT_RATES.dphSK,
-          dphVstup: Number(parsedRates.dphVstup) || DEFAULT_RATES.dphVstup,
-        });
-      }
-    } catch {}
+      const savedData = window.localStorage.getItem(dataKey(year));
+      setMonthlyData(savedData ? JSON.parse(savedData) : {});
+    } catch {
+      setMonthlyData({});
+    }
 
     setLoading(false);
   }, [year]);
@@ -150,47 +496,99 @@ export default function FitMarCalc() {
 
     const timer = window.setTimeout(() => {
       try {
-        window.localStorage.setItem(`fitmar:${year}`, JSON.stringify(data));
+        window.localStorage.setItem(TEMPLATE_KEY, JSON.stringify(template));
       } catch {}
     }, 300);
 
     return () => window.clearTimeout(timer);
-  }, [data, year, loading]);
+  }, [template, loading]);
 
   useEffect(() => {
     if (loading) return;
 
-    try {
-      window.localStorage.setItem("fitmar:rates", JSON.stringify(rates));
-    } catch {}
-  }, [rates, loading]);
+    const timer = window.setTimeout(() => {
+      try {
+        window.localStorage.setItem(dataKey(year), JSON.stringify(monthlyData));
+      } catch {}
+    }, 300);
 
-  const getMonth = (monthNumber: number): MonthData => {
-    return data[monthNumber] || { ...EMPTY };
-  };
+    return () => window.clearTimeout(timer);
+  }, [monthlyData, year, loading]);
 
-  const updateValue = (field: keyof MonthData, raw: string) => {
+  const monthValues: MonthlyValues = monthlyData[selectedMonth] || {};
+
+  const setValue = (itemId: string, value: string) => {
     const num =
-      raw === "" || raw === "-"
+      value === "" || value === "-"
         ? 0
-        : Number.parseFloat(String(raw).replace(",", ".")) || 0;
+        : Number.parseFloat(String(value).replace(",", ".")) || 0;
 
-    setData((prev) => ({
+    setMonthlyData((prev) => ({
       ...prev,
       [selectedMonth]: {
-        ...getMonth(selectedMonth),
-        [field]: num,
+        ...(prev[selectedMonth] || {}),
+        [itemId]: num,
       },
     }));
   };
 
+  const addItem = (category: CategoryId) => {
+    setTemplate((prev) => ({
+      ...prev,
+      items: [
+        ...prev.items,
+        {
+          id: newId(),
+          name: "Nová položka",
+          category,
+          vatType:
+            category === "income" || category === "refunds"
+              ? "output_cz"
+              : "input",
+          vatRate: category === "income" || category === "refunds" ? 12 : 21,
+        },
+      ],
+    }));
+  };
+
+  const updateItem = (id: string, updates: Partial<MonthItem>) => {
+    setTemplate((prev) => ({
+      ...prev,
+      items: prev.items.map((item) =>
+        item.id === id ? { ...item, ...updates } : item
+      ),
+    }));
+  };
+
+  const deleteItem = (id: string) => {
+    setTemplate((prev) => ({
+      ...prev,
+      items: prev.items.filter((item) => item.id !== id),
+    }));
+
+    setMonthlyData((prev) => {
+      const next: MonthlyData = { ...prev };
+
+      Object.keys(next).forEach((monthKey) => {
+        const numericMonth = Number(monthKey);
+        const month = next[numericMonth];
+
+        if (month && month[id] !== undefined) {
+          const copy = { ...month };
+          delete copy[id];
+          next[numericMonth] = copy;
+        }
+      });
+
+      return next;
+    });
+  };
+
   const resetMonth = () => {
-    const currentMonth = MONTHS[selectedMonth - 1];
+    const monthLabel = MONTHS[selectedMonth - 1]?.label || "vybraný měsíc";
 
-    if (!currentMonth) return;
-
-    if (window.confirm(`Vymazat data pro ${currentMonth.label} ${year}?`)) {
-      setData((prev) => {
+    if (window.confirm(`Vymazat vstupy pro ${monthLabel} ${year}?`)) {
+      setMonthlyData((prev) => {
         const next = { ...prev };
         delete next[selectedMonth];
         return next;
@@ -198,797 +596,957 @@ export default function FitMarCalc() {
     }
   };
 
-  const calc = (m: MonthData = EMPTY): CalcResult => {
-    const trzbaCZ = m.trzbaCZ || 0;
-    const trzbaSK = m.trzbaSK || 0;
-    const vratky = m.vratky || 0;
-    const cogs = m.cogs || 0;
-    const logistika = m.logistika || 0;
-    const metaAds = m.metaAds || 0;
-    const googleAds = m.googleAds || 0;
-    const sklik = m.sklik || 0;
-    const tiktokAds = m.tiktokAds || 0;
-    const sluzby = m.sluzby || 0;
-    const fixni = m.fixni || 0;
-
-    const trzbaNetto = trzbaCZ + trzbaSK - vratky;
-    const marketing = metaAds + googleAds + sklik + tiktokAds;
-    const kp = trzbaNetto - cogs - logistika - marketing;
-    const kpMarze = trzbaNetto > 0 ? kp / trzbaNetto : 0;
-    const provozHV = kp - sluzby - fixni;
-
-    const outDPH =
-      trzbaCZ * (rates.dphCZ / 100) +
-      trzbaSK * (rates.dphSK / 100) -
-      vratky * (rates.dphCZ / 100);
-
-    const inDPH =
-      (cogs + logistika + sklik + sluzby + fixni) *
-      (rates.dphVstup / 100);
-
-    const netDPH = inDPH - outDPH;
-    const cash = provozHV + netDPH;
-
-    return {
-      trzbaNetto,
-      marketing,
-      kp,
-      kpMarze,
-      provozHV,
-      outDPH,
-      inDPH,
-      netDPH,
-      cash,
-    };
+  const resetTemplate = () => {
+    setTemplate(DEFAULT_TEMPLATE);
+    setShowResetConfirm(false);
   };
 
-  const month = getMonth(selectedMonth);
-  const r = calc(month);
+  const result = useMemo(
+    () => calculate(template.items, monthValues),
+    [template, monthValues]
+  );
 
   const yearTotals = useMemo<YearTotals>(() => {
-    const filledMonths = Object.keys(data)
-      .map(Number)
-      .filter((monthKey) => {
-        const monthData = data[monthKey];
-        return (
-          monthData &&
-          Object.values(monthData).some((value) => Number(value) !== 0)
-        );
-      });
-
-    const totals: YearTotals = {
-      trzbaNetto: 0,
+    const aggregate: YearTotals = {
+      income: 0,
+      refunds: 0,
+      cogs: 0,
+      logistics: 0,
       marketing: 0,
+      fixed: 0,
+      outputDPHCZ: 0,
+      outputDPHSK: 0,
+      inputDPH: 0,
+      trzbaNetto: 0,
+      varCosts: 0,
       kp: 0,
       kpMarze: 0,
       provozHV: 0,
-      outDPH: 0,
-      inDPH: 0,
+      outputDPH: 0,
       netDPH: 0,
       cash: 0,
-      count: filledMonths.length,
+      count: 0,
     };
 
-    filledMonths.forEach((monthKey) => {
-      const c = calc(data[monthKey]);
+    for (let month = 1; month <= 12; month += 1) {
+      const values = monthlyData[month];
 
-      totals.trzbaNetto += c.trzbaNetto;
-      totals.marketing += c.marketing;
-      totals.kp += c.kp;
-      totals.provozHV += c.provozHV;
-      totals.outDPH += c.outDPH;
-      totals.inDPH += c.inDPH;
-      totals.netDPH += c.netDPH;
-      totals.cash += c.cash;
-    });
+      if (!values || !Object.values(values).some((value) => Number(value) !== 0)) {
+        continue;
+      }
 
-    totals.kpMarze =
-      totals.trzbaNetto > 0 ? totals.kp / totals.trzbaNetto : 0;
+      const calculated = calculate(template.items, values);
 
-    return totals;
-  }, [data, rates]);
-
-  const fmt = (n: number | undefined | null): string => {
-    if (n === 0 || Number.isNaN(n) || n === undefined || n === null) {
-      return "0";
+      aggregate.count += 1;
+      aggregate.income += calculated.income;
+      aggregate.refunds += calculated.refunds;
+      aggregate.cogs += calculated.cogs;
+      aggregate.logistics += calculated.logistics;
+      aggregate.marketing += calculated.marketing;
+      aggregate.fixed += calculated.fixed;
+      aggregate.outputDPHCZ += calculated.outputDPHCZ;
+      aggregate.outputDPHSK += calculated.outputDPHSK;
+      aggregate.inputDPH += calculated.inputDPH;
+      aggregate.trzbaNetto += calculated.trzbaNetto;
+      aggregate.varCosts += calculated.varCosts;
+      aggregate.kp += calculated.kp;
+      aggregate.provozHV += calculated.provozHV;
+      aggregate.outputDPH += calculated.outputDPH;
+      aggregate.netDPH += calculated.netDPH;
+      aggregate.cash += calculated.cash;
     }
 
-    const value = Math.round(n);
-    return value.toLocaleString("cs-CZ").replace(/[\u00A0\u202F]/g, " ");
-  };
+    aggregate.kpMarze =
+      aggregate.trzbaNetto > 0 ? aggregate.kp / aggregate.trzbaNetto : 0;
 
-  const fmtKc = (n: number | undefined | null): string => `${fmt(n)} Kč`;
+    return aggregate;
+  }, [template, monthlyData]);
 
-  const fmtPct = (n: number | undefined | null): string => {
-    if (Number.isNaN(n) || n === undefined || n === null) {
-      return "0,0 %";
-    }
-
-    return (n * 100).toFixed(1).replace(".", ",") + " %";
-  };
-
-  const isMonthFilled = (monthNumber: number): boolean => {
-    const monthData = data[monthNumber];
-
+  const isMonthFilled = (month: number) => {
+    const values = monthlyData[month];
     return Boolean(
-      monthData &&
-        Object.values(monthData).some((value) => Number(value) !== 0)
+      values && Object.values(values).some((value) => Number(value) !== 0)
     );
   };
 
-  const inputs: InputGroup[] = [
-    {
-      section: "Příjmy",
-      tone: "emerald",
-      items: [
-        {
-          field: "trzbaCZ",
-          label: "Tržba ČR",
-          tax: `DPH ${rates.dphCZ} %`,
-          taxTone: "zinc",
-        },
-        {
-          field: "trzbaSK",
-          label: "Tržba SK / OSS",
-          tax: `DPH ${rates.dphSK} %`,
-          taxTone: "zinc",
-        },
-        {
-          field: "vratky",
-          label: "Vratky",
-          tax: `DPH ${rates.dphCZ} %`,
-          taxTone: "zinc",
-          neg: true,
-        },
-      ],
-    },
-    {
-      section: "Variabilní náklady",
-      tone: "orange",
-      items: [
-        {
-          field: "cogs",
-          label: "COGS (sklenice, ořechy, packaging)",
-          tax: `DPH ${rates.dphVstup} %`,
-          taxTone: "zinc",
-        },
-        {
-          field: "logistika",
-          label: "Logistika (přeprava, fulfillment)",
-          tax: `DPH ${rates.dphVstup} %`,
-          taxTone: "zinc",
-        },
-      ],
-    },
-    {
-      section: "Marketing",
-      tone: "amber",
-      items: [
-        {
-          field: "metaAds",
-          label: "Meta Ads",
-          tax: "reverse charge",
-          taxTone: "sky",
-        },
-        {
-          field: "googleAds",
-          label: "Google Ads",
-          tax: "reverse charge",
-          taxTone: "sky",
-        },
-        {
-          field: "sklik",
-          label: "Sklik (Seznam.cz)",
-          tax: `DPH ${rates.dphVstup} %`,
-          taxTone: "zinc",
-        },
-        {
-          field: "tiktokAds",
-          label: "TikTok Ads",
-          tax: "reverse charge",
-          taxTone: "sky",
-        },
-      ],
-    },
-    {
-      section: "Fixní náklady",
-      tone: "rose",
-      items: [
-        {
-          field: "sluzby",
-          label: "Služby & SaaS",
-          tax: `DPH ${rates.dphVstup} %`,
-          taxTone: "zinc",
-        },
-        {
-          field: "fixni",
-          label: "Fixní náklady (nájem, mzdy…)",
-          tax: `DPH ${rates.dphVstup} %`,
-          taxTone: "zinc",
-        },
-      ],
-    },
-  ];
+  const itemsByCategory = useMemo<Record<CategoryId, MonthItem[]>>(() => {
+    const map: Record<CategoryId, MonthItem[]> = {
+      income: [],
+      refunds: [],
+      cogs: [],
+      logistics: [],
+      marketing: [],
+      fixed: [],
+    };
 
-  const toneClasses: Record<InputGroup["tone"], string> = {
-    emerald: "text-emerald-700 border-emerald-200",
-    orange: "text-orange-700 border-orange-200",
-    amber: "text-amber-700 border-amber-200",
-    rose: "text-rose-700 border-rose-200",
-  };
+    template.items.forEach((item) => {
+      map[item.category].push(item);
+    });
+
+    return map;
+  }, [template]);
 
   const currentMonthLabel = MONTHS[selectedMonth - 1]?.label || "";
 
   return (
     <div
-      className="min-h-screen w-full"
+      className="min-h-screen w-full relative overflow-x-hidden"
       style={{
-        backgroundColor: "#FAF7F2",
-        fontFamily: UI,
-        color: "#0A0E1A",
+        background: "#020617",
+        color: "#E2E8F0",
+        fontFamily: FONT_UI,
       }}
     >
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap');
+
         input[type="number"]::-webkit-inner-spin-button,
-        input[type="number"]::-webkit-outer-spin-button {
-          -webkit-appearance: none;
-          margin: 0;
+        input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        input[type="number"] { -moz-appearance: textfield; }
+
+        .glow-cyan { box-shadow: 0 0 0 1px rgba(34, 211, 238, 0.3), 0 0 20px rgba(34, 211, 238, 0.15), inset 0 0 20px rgba(34, 211, 238, 0.05); }
+        .text-glow-cyan { text-shadow: 0 0 20px rgba(34, 211, 238, 0.5), 0 0 40px rgba(34, 211, 238, 0.3); }
+        .text-glow-rose { text-shadow: 0 0 20px rgba(244, 114, 182, 0.5), 0 0 40px rgba(244, 114, 182, 0.3); }
+
+        .panel { background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(12px); border: 1px solid rgba(56, 189, 248, 0.15); }
+        .panel:hover { border-color: rgba(56, 189, 248, 0.3); }
+
+        .corner-bracket { position: absolute; width: 12px; height: 12px; border-color: rgba(34, 211, 238, 0.6); }
+        .corner-bracket.tl { top: -1px; left: -1px; border-top: 1.5px solid; border-left: 1.5px solid; }
+        .corner-bracket.tr { top: -1px; right: -1px; border-top: 1.5px solid; border-right: 1.5px solid; }
+        .corner-bracket.bl { bottom: -1px; left: -1px; border-bottom: 1.5px solid; border-left: 1.5px solid; }
+        .corner-bracket.br { bottom: -1px; right: -1px; border-bottom: 1.5px solid; border-right: 1.5px solid; }
+
+        .hex-grid {
+          background-image:
+            linear-gradient(rgba(56, 189, 248, 0.04) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(56, 189, 248, 0.04) 1px, transparent 1px);
+          background-size: 48px 48px;
         }
-        input[type="number"] {
-          -moz-appearance: textfield;
+
+        .month-tab { transition: all 0.2s; }
+        .month-tab:hover:not(.active) { background: rgba(34, 211, 238, 0.08); border-color: rgba(34, 211, 238, 0.3); }
+        .month-tab.active { background: linear-gradient(135deg, rgba(34, 211, 238, 0.15), rgba(56, 189, 248, 0.05)); border-color: rgba(34, 211, 238, 0.5); color: #22D3EE; }
+        .month-tab.filled .filled-dot { opacity: 1; }
+        .month-tab.active.filled .filled-dot { background: #22D3EE; }
+
+        .num-input { background: rgba(2, 6, 23, 0.6); border: 1px solid rgba(56, 189, 248, 0.2); }
+        .num-input:focus { outline: none; border-color: rgba(34, 211, 238, 0.6); box-shadow: 0 0 0 3px rgba(34, 211, 238, 0.15); background: rgba(2, 6, 23, 0.9); }
+        .num-input:hover { border-color: rgba(56, 189, 248, 0.4); }
+
+        .btn-primary { background: linear-gradient(135deg, #06B6D4, #0891B2); color: #020617; font-weight: 600; transition: all 0.2s; }
+        .btn-primary:hover { background: linear-gradient(135deg, #22D3EE, #06B6D4); box-shadow: 0 0 30px rgba(34, 211, 238, 0.4); }
+
+        .btn-ghost { background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(56, 189, 248, 0.2); transition: all 0.2s; }
+        .btn-ghost:hover { background: rgba(15, 23, 42, 0.8); border-color: rgba(56, 189, 248, 0.5); color: #22D3EE; }
+
+        .vat-badge {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          padding: 2px 8px;
+          border-radius: 3px;
+          font-size: 10px;
+          font-weight: 600;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+          font-family: ${FONT_MONO};
         }
-        .num-input:focus {
-          outline: 2px solid #0A0E1A;
-          outline-offset: -2px;
-          background: #fff;
+
+        .row-hover:hover { background: rgba(34, 211, 238, 0.04); }
+
+        @keyframes pulse-glow {
+          0%, 100% { opacity: 0.4; }
+          50% { opacity: 1; }
         }
-        .month-pill:hover {
-          background: rgba(10,14,26,0.04);
+
+        .pulse-dot { animation: pulse-glow 2s ease-in-out infinite; }
+
+        select {
+          background: rgba(2, 6, 23, 0.8);
+          border: 1px solid rgba(56, 189, 248, 0.3);
+          color: #E2E8F0;
+          padding: 4px 8px;
+          border-radius: 3px;
+          font-family: ${FONT_MONO};
+          font-size: 11px;
         }
-        .month-pill.active {
-          background: #0A0E1A;
-          color: #FAF7F2;
-        }
-        .month-pill.filled::after {
-          content: '';
-          position: absolute;
-          bottom: 4px;
-          left: 50%;
-          transform: translateX(-50%);
-          width: 4px;
-          height: 4px;
-          border-radius: 50%;
-          background: #059669;
-        }
-        .month-pill.active.filled::after {
-          background: #6EE7B7;
+
+        select:focus {
+          outline: none;
+          border-color: rgba(34, 211, 238, 0.6);
         }
       `}</style>
 
-      <div className="max-w-7xl mx-auto px-6 py-10">
-        <header className="mb-8 flex flex-wrap items-end justify-between gap-4 pb-6 border-b border-stone-300">
-          <div>
-            <p className="text-xs uppercase tracking-[0.2em] text-stone-500 mb-2">
-              FitMar · Peanut Company s.r.o.
-            </p>
+      <div className="absolute inset-0 hex-grid pointer-events-none opacity-40" />
 
-            <h1
-              style={{
-                fontFamily: DISPLAY,
-                fontWeight: 500,
-                fontSize: "2.5rem",
-                lineHeight: 1.05,
-                letterSpacing: "-0.02em",
-              }}
-            >
-              Cash Flow Kalkulačka
-            </h1>
+      <div
+        className="absolute pointer-events-none"
+        style={{
+          top: "-20%",
+          left: "-10%",
+          width: "60%",
+          height: "60%",
+          background:
+            "radial-gradient(circle, rgba(34, 211, 238, 0.12) 0%, transparent 60%)",
+          filter: "blur(60px)",
+        }}
+      />
 
-            <p className="text-sm text-stone-600 mt-2 max-w-2xl">
-              Měsíční P&amp;L se zohledněním DPH asymetrie. Reverse charge u
-              Meta/Google/TikTok je DPH-neutrální.
-            </p>
-          </div>
+      <div
+        className="absolute pointer-events-none"
+        style={{
+          top: "20%",
+          right: "-10%",
+          width: "50%",
+          height: "60%",
+          background:
+            "radial-gradient(circle, rgba(99, 102, 241, 0.1) 0%, transparent 60%)",
+          filter: "blur(80px)",
+        }}
+      />
 
-          <div className="flex items-center gap-2">
-            <select
-              value={year}
-              onChange={(event) => setYear(Number.parseInt(event.target.value, 10))}
-              className="px-3 py-2 text-sm bg-white border border-stone-300 hover:border-stone-500 transition"
-              style={{ fontFamily: MONO }}
-            >
-              {[2024, 2025, 2026, 2027].map((yearOption) => (
-                <option key={yearOption} value={yearOption}>
-                  {yearOption}
-                </option>
-              ))}
-            </select>
+      <div className="relative max-w-7xl mx-auto px-6 py-8">
+        <header className="mb-8">
+          <div className="flex flex-wrap items-end justify-between gap-4 pb-6 border-b border-cyan-500/20">
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <span className="pulse-dot inline-block w-2 h-2 rounded-full bg-cyan-400" />
+                <p
+                  className="text-[10px] uppercase tracking-[0.3em] text-cyan-400/80"
+                  style={{ fontFamily: FONT_MONO }}
+                >
+                  // FITMAR · CASH FLOW UNIT · v2.0
+                </p>
+              </div>
 
-            <button
-              onClick={() => setShowSettings((prev) => !prev)}
-              className="p-2 bg-white border border-stone-300 hover:border-stone-500 transition"
-              title="DPH sazby"
-              type="button"
-            >
-              <Settings size={16} />
-            </button>
+              <h1
+                style={{
+                  fontFamily: FONT_DISPLAY,
+                  fontWeight: 600,
+                  fontSize: "2.75rem",
+                  lineHeight: 1,
+                  letterSpacing: "-0.02em",
+                }}
+                className="text-glow-cyan"
+              >
+                <span className="text-cyan-300">CASH</span>
+                <span className="text-slate-100"> FLOW </span>
+                <span className="text-slate-400">CALC</span>
+              </h1>
+
+              <p className="text-sm text-slate-400 mt-3 max-w-2xl">
+                Modulární P&amp;L kalkulačka s plně konfigurovatelnými
+                položkami a sazbami DPH.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <select
+                value={year}
+                onChange={(event) =>
+                  setYear(Number.parseInt(event.target.value, 10))
+                }
+                className="text-sm"
+                style={{
+                  fontFamily: FONT_MONO,
+                  fontSize: "13px",
+                  padding: "8px 12px",
+                }}
+              >
+                {[2024, 2025, 2026, 2027, 2028].map((yearOption) => (
+                  <option
+                    key={yearOption}
+                    value={yearOption}
+                    style={{ background: "#020617" }}
+                  >
+                    {yearOption}
+                  </option>
+                ))}
+              </select>
+
+              <button
+                onClick={() => setEditMode((prev) => !prev)}
+                className={`btn-ghost px-4 py-2 flex items-center gap-2 text-sm ${
+                  editMode ? "glow-cyan" : ""
+                }`}
+                style={{ fontFamily: FONT_MONO, fontSize: "12px" }}
+                type="button"
+              >
+                {editMode ? (
+                  <>
+                    <Check size={14} /> HOTOVO
+                  </>
+                ) : (
+                  <>
+                    <Edit3 size={14} /> EDITOVAT
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </header>
 
-        {showSettings && (
-          <div className="mb-6 p-5 bg-white border border-stone-300">
-            <div className="flex items-center gap-2 mb-3">
-              <Settings size={14} />
-              <h3 className="text-sm font-semibold uppercase tracking-wider">
-                DPH sazby
-              </h3>
-            </div>
+        <div className="mb-8 grid grid-cols-6 md:grid-cols-12 gap-1.5 panel p-2 relative">
+          <span className="corner-bracket tl" />
+          <span className="corner-bracket tr" />
+          <span className="corner-bracket bl" />
+          <span className="corner-bracket br" />
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              {[
-                { key: "dphCZ" as keyof Rates, label: "Výstup ČR" },
-                { key: "dphSK" as keyof Rates, label: "Výstup SK / OSS" },
-                { key: "dphVstup" as keyof Rates, label: "Vstup" },
-              ].map(({ key, label }) => (
-                <label key={key} className="block">
-                  <span className="text-xs text-stone-600 block mb-1">
-                    {label}
-                  </span>
-
-                  <div className="flex items-center bg-stone-50 border border-stone-300">
-                    <input
-                      type="number"
-                      step="0.5"
-                      value={rates[key]}
-                      onChange={(event) =>
-                        setRates((prev) => ({
-                          ...prev,
-                          [key]: Number.parseFloat(event.target.value) || 0,
-                        }))
-                      }
-                      className="w-full px-3 py-2 bg-transparent num-input text-right"
-                      style={{ fontFamily: MONO }}
-                    />
-
-                    <span className="px-3 text-stone-500 text-sm">%</span>
-                  </div>
-                </label>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <div className="mb-8 grid grid-cols-3 sm:grid-cols-6 lg:grid-cols-12 gap-1 bg-white border border-stone-300 p-1">
-          {MONTHS.map((monthItem) => (
+          {MONTHS.map((month) => (
             <button
-              key={monthItem.idx}
-              onClick={() => setSelectedMonth(monthItem.idx)}
-              className={`month-pill relative py-3 text-xs uppercase tracking-wider transition ${
-                selectedMonth === monthItem.idx ? "active" : ""
-              } ${isMonthFilled(monthItem.idx) ? "filled" : ""}`}
-              style={{ fontFamily: MONO, fontWeight: 500 }}
+              key={month.idx}
+              onClick={() => setSelectedMonth(month.idx)}
+              className={`month-tab relative py-2.5 px-1 text-xs uppercase tracking-wider border border-transparent rounded-sm ${
+                selectedMonth === month.idx ? "active" : "text-slate-400"
+              } ${isMonthFilled(month.idx) ? "filled" : ""}`}
+              style={{ fontFamily: FONT_MONO, fontWeight: 500 }}
               type="button"
             >
-              {monthItem.short}
+              {month.short}
+              <span
+                className="filled-dot absolute bottom-1 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full bg-emerald-400 opacity-0 transition-opacity"
+                style={{
+                  boxShadow: "0 0 6px rgba(52, 211, 153, 0.6)",
+                }}
+              />
             </button>
           ))}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 mb-10">
-          <div className="lg:col-span-3 space-y-5">
-            <div className="flex items-center justify-between">
-              <h2
-                style={{
-                  fontFamily: DISPLAY,
-                  fontWeight: 500,
-                  fontSize: "1.5rem",
-                }}
-              >
-                {currentMonthLabel} {year}
-              </h2>
-
-              <button
-                onClick={resetMonth}
-                className="flex items-center gap-1.5 text-xs text-stone-500 hover:text-stone-900 transition"
-                type="button"
-              >
-                <RotateCcw size={12} />
-                Vymazat měsíc
-              </button>
-            </div>
-
-            {inputs.map((group) => (
-              <section
-                key={group.section}
-                className={`bg-white border-l-2 ${toneClasses[group.tone]} border-y border-r border-stone-200`}
-              >
-                <header className={`px-5 pt-4 pb-2 ${toneClasses[group.tone]}`}>
-                  <h3 className="text-xs uppercase tracking-[0.15em] font-semibold">
-                    {group.section}
-                  </h3>
-                </header>
-
-                <div className="divide-y divide-stone-100">
-                  {group.items.map((item) => (
-                    <div
-                      key={item.field}
-                      className="flex flex-col sm:flex-row sm:items-center gap-3 px-5 py-2.5"
-                    >
-                      <span className="flex-1 text-sm">{item.label}</span>
-
-                      <span
-                        className={`text-[10px] uppercase tracking-wider px-2 py-0.5 rounded w-fit ${
-                          item.taxTone === "sky"
-                            ? "bg-sky-50 text-sky-700"
-                            : "bg-stone-100 text-stone-500"
-                        }`}
-                      >
-                        {item.tax}
-                      </span>
-
-                      <div className="flex items-center bg-stone-50 border border-stone-200 hover:border-stone-400 focus-within:border-stone-900 transition w-full sm:w-44">
-                        {item.neg && (
-                          <span className="pl-2 text-stone-400 text-sm">−</span>
-                        )}
-
-                        <input
-                          type="number"
-                          inputMode="decimal"
-                          value={month[item.field] || ""}
-                          onChange={(event) =>
-                            updateValue(item.field, event.target.value)
-                          }
-                          placeholder="0"
-                          className="num-input flex-1 px-2 py-2 text-right bg-transparent min-w-0"
-                          style={{
-                            fontFamily: MONO,
-                            fontSize: "13px",
-                            fontWeight: 500,
-                          }}
-                        />
-
-                        <span className="pr-3 text-stone-500 text-xs">Kč</span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            ))}
-          </div>
-
-          <div className="lg:col-span-2 space-y-5">
-            <div className="bg-stone-900 text-stone-50 p-6">
-              <p className="text-[10px] uppercase tracking-[0.2em] text-stone-400 mb-2">
-                Cash provozní výsledek
-              </p>
-
-              <p
-                style={{
-                  fontFamily: DISPLAY,
-                  fontWeight: 500,
-                  fontSize: "2.5rem",
-                  lineHeight: 1,
-                  letterSpacing: "-0.02em",
-                }}
-                className={r.cash >= 0 ? "text-emerald-300" : "text-rose-300"}
-              >
-                {r.cash >= 0 ? "+" : ""}
-                {fmtKc(r.cash)}
-              </p>
-
-              <div className="flex items-center gap-2 mt-3 text-xs text-stone-400">
-                {r.cash >= 0 ? (
-                  <TrendingUp size={14} />
-                ) : (
-                  <TrendingDown size={14} />
-                )}
-
-                <span>
-                  Provozní HV {fmtKc(r.provozHV)} · Net DPH{" "}
-                  {r.netDPH >= 0 ? "+" : ""}
-                  {fmtKc(r.netDPH)}
-                </span>
-              </div>
-            </div>
-
-            <div className="bg-white border border-stone-200">
-              <header className="px-5 py-3 border-b border-stone-200">
-                <h3 className="text-xs uppercase tracking-[0.15em] font-semibold text-stone-600">
-                  P&amp;L netto
-                </h3>
-              </header>
-
-              <dl
-                className="divide-y divide-stone-100"
-                style={{ fontFamily: MONO, fontSize: "13px" }}
-              >
-                <Row label="Tržba netto" value={fmtKc(r.trzbaNetto)} bold />
-                <Row label="− COGS" value={fmtKc(-(month.cogs || 0))} muted />
-                <Row
-                  label="− Logistika"
-                  value={fmtKc(-(month.logistika || 0))}
-                  muted
-                />
-                <Row label="− Marketing" value={fmtKc(-r.marketing)} muted />
-                <Row
-                  label="Krycí příspěvek"
-                  value={fmtKc(r.kp)}
-                  bold
-                  accent={r.kp >= 0 ? "emerald" : "rose"}
-                />
-                <Row label="KP marže" value={fmtPct(r.kpMarze)} muted small />
-                <Row
-                  label="− Služby & SaaS"
-                  value={fmtKc(-(month.sluzby || 0))}
-                  muted
-                />
-                <Row
-                  label="− Fixní náklady"
-                  value={fmtKc(-(month.fixni || 0))}
-                  muted
-                />
-                <Row
-                  label="Provozní HV"
-                  value={fmtKc(r.provozHV)}
-                  bold
-                  accent={r.provozHV >= 0 ? "emerald" : "rose"}
-                />
-              </dl>
-            </div>
-
-            <div className="bg-white border border-stone-200">
-              <header className="px-5 py-3 border-b border-stone-200 flex items-center gap-2">
-                <h3 className="text-xs uppercase tracking-[0.15em] font-semibold text-stone-600">
-                  DPH cash flow
-                </h3>
-                <Info size={11} className="text-stone-400" />
-              </header>
-
-              <dl
-                className="divide-y divide-stone-100"
-                style={{ fontFamily: MONO, fontSize: "13px" }}
-              >
-                <Row
-                  label="DPH na výstupu"
-                  value={fmtKc(r.outDPH)}
-                  muted
-                  icon={<ArrowUpFromLine size={11} className="text-rose-500" />}
-                />
-                <Row
-                  label="DPH na vstupu"
-                  value={fmtKc(r.inDPH)}
-                  muted
-                  icon={
-                    <ArrowDownToLine size={11} className="text-emerald-500" />
-                  }
-                />
-                <Row
-                  label={r.netDPH >= 0 ? "Vrácení od FÚ" : "Odvod na FÚ"}
-                  value={`${r.netDPH >= 0 ? "+" : ""}${fmtKc(r.netDPH)}`}
-                  bold
-                  accent={r.netDPH >= 0 ? "emerald" : "rose"}
-                />
-              </dl>
-
-              <div className="px-5 py-3 bg-stone-50 text-[11px] text-stone-600 border-t border-stone-100 leading-relaxed">
-                Asymetrie vstupního a výstupního DPH se propisuje do cash flow.
-                Reverse charge je v této kalkulačce vedený jako DPH-neutrální.
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <section className="mb-8">
-          <header className="mb-4 flex items-end justify-between">
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
             <h2
               style={{
-                fontFamily: DISPLAY,
-                fontWeight: 500,
+                fontFamily: FONT_DISPLAY,
+                fontWeight: 600,
                 fontSize: "1.5rem",
               }}
             >
-              Roční přehled {year}
+              <span className="text-cyan-300">▸</span> {currentMonthLabel}{" "}
+              <span className="text-slate-500">{year}</span>
             </h2>
 
-            <p className="text-xs text-stone-500" style={{ fontFamily: MONO }}>
-              {yearTotals.count || 0} / 12 měsíců vyplněno
-            </p>
-          </header>
-
-          <div className="bg-white border border-stone-200 overflow-x-auto">
-            <table className="w-full text-sm" style={{ fontFamily: MONO }}>
-              <thead className="bg-stone-50 border-b border-stone-200">
-                <tr className="text-[10px] uppercase tracking-wider text-stone-600">
-                  <th className="text-left px-4 py-3 font-semibold">Měsíc</th>
-                  <th className="text-right px-4 py-3 font-semibold">
-                    Tržba netto
-                  </th>
-                  <th className="text-right px-4 py-3 font-semibold">KP</th>
-                  <th className="text-right px-4 py-3 font-semibold">KP %</th>
-                  <th className="text-right px-4 py-3 font-semibold">
-                    Provozní HV
-                  </th>
-                  <th className="text-right px-4 py-3 font-semibold">
-                    Net DPH
-                  </th>
-                  <th className="text-right px-4 py-3 font-semibold">
-                    Cash výsledek
-                  </th>
-                </tr>
-              </thead>
-
-              <tbody className="divide-y divide-stone-100">
-                {MONTHS.map((monthItem) => {
-                  const monthData = data[monthItem.idx] || EMPTY;
-                  const c = calc(monthData);
-                  const filled = isMonthFilled(monthItem.idx);
-
-                  return (
-                    <tr
-                      key={monthItem.idx}
-                      onClick={() => setSelectedMonth(monthItem.idx)}
-                      className={`cursor-pointer transition ${
-                        selectedMonth === monthItem.idx
-                          ? "bg-stone-50"
-                          : "hover:bg-stone-50/50"
-                      } ${!filled ? "text-stone-300" : ""}`}
-                    >
-                      <td
-                        className="px-4 py-2.5 font-medium"
-                        style={{ fontFamily: UI }}
-                      >
-                        {monthItem.label}
-
-                        {selectedMonth === monthItem.idx && (
-                          <span className="ml-2 text-[10px] uppercase text-stone-400">
-                            aktuální
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="px-4 py-2.5 text-right tabular-nums">
-                        {filled ? fmtKc(c.trzbaNetto) : "—"}
-                      </td>
-
-                      <td
-                        className={`px-4 py-2.5 text-right tabular-nums ${
-                          filled && c.kp < 0 ? "text-rose-600" : ""
-                        }`}
-                      >
-                        {filled ? fmtKc(c.kp) : "—"}
-                      </td>
-
-                      <td
-                        className={`px-4 py-2.5 text-right tabular-nums ${
-                          filled && c.kpMarze < 0 ? "text-rose-600" : ""
-                        }`}
-                      >
-                        {filled ? fmtPct(c.kpMarze) : "—"}
-                      </td>
-
-                      <td
-                        className={`px-4 py-2.5 text-right tabular-nums ${
-                          filled && c.provozHV < 0 ? "text-rose-600" : ""
-                        }`}
-                      >
-                        {filled ? fmtKc(c.provozHV) : "—"}
-                      </td>
-
-                      <td
-                        className={`px-4 py-2.5 text-right tabular-nums ${
-                          filled && c.netDPH > 0
-                            ? "text-emerald-600"
-                            : filled && c.netDPH < 0
-                            ? "text-rose-600"
-                            : ""
-                        }`}
-                      >
-                        {filled
-                          ? `${c.netDPH >= 0 ? "+" : ""}${fmtKc(c.netDPH)}`
-                          : "—"}
-                      </td>
-
-                      <td
-                        className={`px-4 py-2.5 text-right tabular-nums font-semibold ${
-                          filled && c.cash < 0
-                            ? "text-rose-600"
-                            : filled && c.cash > 0
-                            ? "text-emerald-700"
-                            : ""
-                        }`}
-                      >
-                        {filled ? fmtKc(c.cash) : "—"}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-
-              {yearTotals.count > 0 && (
-                <tfoot className="bg-stone-900 text-stone-50">
-                  <tr>
-                    <td
-                      className="px-4 py-3 text-xs uppercase tracking-wider"
-                      style={{ fontFamily: UI, fontWeight: 600 }}
-                    >
-                      Σ Kumulativně
-                    </td>
-
-                    <td className="px-4 py-3 text-right tabular-nums font-semibold">
-                      {fmtKc(yearTotals.trzbaNetto)}
-                    </td>
-
-                    <td
-                      className={`px-4 py-3 text-right tabular-nums font-semibold ${
-                        yearTotals.kp < 0
-                          ? "text-rose-300"
-                          : "text-emerald-300"
-                      }`}
-                    >
-                      {fmtKc(yearTotals.kp)}
-                    </td>
-
-                    <td
-                      className={`px-4 py-3 text-right tabular-nums font-semibold ${
-                        yearTotals.kpMarze < 0
-                          ? "text-rose-300"
-                          : "text-emerald-300"
-                      }`}
-                    >
-                      {fmtPct(yearTotals.kpMarze || 0)}
-                    </td>
-
-                    <td
-                      className={`px-4 py-3 text-right tabular-nums font-semibold ${
-                        yearTotals.provozHV < 0
-                          ? "text-rose-300"
-                          : "text-emerald-300"
-                      }`}
-                    >
-                      {fmtKc(yearTotals.provozHV)}
-                    </td>
-
-                    <td
-                      className={`px-4 py-3 text-right tabular-nums font-semibold ${
-                        yearTotals.netDPH < 0
-                          ? "text-rose-300"
-                          : "text-emerald-300"
-                      }`}
-                    >
-                      {`${yearTotals.netDPH >= 0 ? "+" : ""}${fmtKc(
-                        yearTotals.netDPH
-                      )}`}
-                    </td>
-
-                    <td
-                      className={`px-4 py-3 text-right tabular-nums font-bold text-base ${
-                        yearTotals.cash < 0
-                          ? "text-rose-300"
-                          : "text-emerald-300"
-                      }`}
-                    >
-                      {fmtKc(yearTotals.cash)}
-                    </td>
-                  </tr>
-                </tfoot>
-              )}
-            </table>
+            {editMode && (
+              <span
+                className="text-[10px] uppercase tracking-wider px-2 py-1 bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 rounded-sm"
+                style={{ fontFamily: FONT_MONO }}
+              >
+                ⚡ EDIT MODE
+              </span>
+            )}
           </div>
-        </section>
 
-        <footer className="text-[11px] text-stone-400 text-center py-6 border-t border-stone-200">
-          <p style={{ fontFamily: MONO }}>
-            Data se ukládají automaticky v prohlížeči · vyplněné měsíce mají
-            zelenou tečku · klikni na řádek pro úpravu
-          </p>
+          <div className="flex items-center gap-2">
+            {editMode && (
+              <button
+                onClick={() => setShowResetConfirm(true)}
+                className="btn-ghost px-3 py-1.5 flex items-center gap-1.5 text-xs text-slate-400 hover:text-rose-400"
+                style={{ fontFamily: FONT_MONO }}
+                type="button"
+              >
+                <RotateCcw size={11} /> RESET STRUKTURY
+              </button>
+            )}
+
+            <button
+              onClick={resetMonth}
+              className="btn-ghost px-3 py-1.5 flex items-center gap-1.5 text-xs text-slate-400"
+              style={{ fontFamily: FONT_MONO }}
+              type="button"
+            >
+              <Trash2 size={11} /> VYMAZAT MĚSÍC
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 xl:grid-cols-5 gap-6 mb-10">
+          <div className="xl:col-span-3 space-y-4">
+            {CATEGORIES.map((category) => {
+              const items = itemsByCategory[category.id] || [];
+              const categoryTotal = items.reduce(
+                (sum, item) => sum + Number(monthValues[item.id] || 0),
+                0
+              );
+              const categoryVat = items.reduce(
+                (sum, item) =>
+                  sum +
+                  Number(monthValues[item.id] || 0) *
+                    ((item.vatRate || 0) / 100),
+                0
+              );
+
+              return (
+                <CategoryPanel
+                  key={category.id}
+                  category={category}
+                  items={items}
+                  values={monthValues}
+                  total={categoryTotal}
+                  vatTotal={categoryVat}
+                  editMode={editMode}
+                  onValueChange={setValue}
+                  onAddItem={() => addItem(category.id)}
+                  onUpdateItem={updateItem}
+                  onDeleteItem={deleteItem}
+                />
+              );
+            })}
+          </div>
+
+          <div className="xl:col-span-2 space-y-4">
+            <ResultsPanel result={result} />
+          </div>
+        </div>
+
+        <YearOverview
+          template={template}
+          monthlyData={monthlyData}
+          year={year}
+          selectedMonth={selectedMonth}
+          onSelectMonth={setSelectedMonth}
+          isMonthFilled={isMonthFilled}
+          yearTotals={yearTotals}
+        />
+
+        <footer
+          className="mt-12 pt-6 border-t border-cyan-500/10 flex items-center justify-between text-[10px] uppercase tracking-[0.2em] text-slate-500"
+          style={{ fontFamily: FONT_MONO }}
+        >
+          <span className="flex items-center gap-2">
+            <Activity size={11} className="text-cyan-400" />
+            AUTO-SYNC · {template.items.length} POLOŽEK
+          </span>
+          <span>{yearTotals.count || 0} / 12 MĚSÍCŮ AKTIVNÍCH</span>
         </footer>
+      </div>
+
+      {showResetConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm"
+          onClick={() => setShowResetConfirm(false)}
+        >
+          <div
+            className="panel p-6 max-w-md w-full glow-cyan relative"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <span className="corner-bracket tl" />
+            <span className="corner-bracket tr" />
+            <span className="corner-bracket bl" />
+            <span className="corner-bracket br" />
+
+            <div className="flex items-start gap-3 mb-4">
+              <AlertTriangle
+                className="text-amber-400 shrink-0 mt-1"
+                size={20}
+              />
+
+              <div>
+                <h3
+                  style={{
+                    fontFamily: FONT_DISPLAY,
+                    fontWeight: 600,
+                    fontSize: "1.1rem",
+                  }}
+                  className="text-slate-100"
+                >
+                  Reset struktury položek
+                </h3>
+
+                <p className="text-sm text-slate-400 mt-2">
+                  Tohle obnoví výchozí seznam položek. Hodnoty v měsících
+                  zůstanou uložené, ale položky se po resetu vrátí na výchozí
+                  strukturu.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mt-6">
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="btn-ghost px-4 py-2 text-xs"
+                style={{ fontFamily: FONT_MONO }}
+                type="button"
+              >
+                ZRUŠIT
+              </button>
+
+              <button
+                onClick={resetTemplate}
+                className="btn-primary px-4 py-2 text-xs"
+                style={{ fontFamily: FONT_MONO }}
+                type="button"
+              >
+                RESETOVAT
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CategoryPanel({
+  category,
+  items,
+  values,
+  total,
+  vatTotal,
+  editMode,
+  onValueChange,
+  onAddItem,
+  onUpdateItem,
+  onDeleteItem,
+}: CategoryPanelProps) {
+  return (
+    <section className="panel relative">
+      <span className="corner-bracket tl" />
+      <span className="corner-bracket tr" />
+      <span className="corner-bracket bl" />
+      <span className="corner-bracket br" />
+
+      <header className="flex items-center justify-between px-5 py-3 border-b border-cyan-500/15">
+        <div className="flex items-center gap-3">
+          <span
+            className="w-1 h-5 rounded-full"
+            style={{
+              background: category.accent,
+              boxShadow: `0 0 12px ${category.accent}`,
+            }}
+          />
+
+          <div>
+            <h3
+              className="text-sm font-semibold uppercase tracking-[0.15em]"
+              style={{
+                color: category.accent,
+                fontFamily: FONT_DISPLAY,
+              }}
+            >
+              {category.label}
+            </h3>
+
+            <p
+              className="text-[10px] text-slate-500 mt-0.5"
+              style={{ fontFamily: FONT_MONO }}
+            >
+              {category.desc}
+            </p>
+          </div>
+        </div>
+
+        <div className="text-right">
+          <div
+            className="text-base tabular-nums"
+            style={{
+              fontFamily: FONT_MONO,
+              color: category.accent,
+            }}
+          >
+            {fmtKc(total)}
+          </div>
+
+          {vatTotal !== 0 && (
+            <div
+              className="text-[10px] text-slate-500 mt-0.5"
+              style={{ fontFamily: FONT_MONO }}
+            >
+              DPH: {fmtKc(vatTotal)}
+            </div>
+          )}
+        </div>
+      </header>
+
+      <div className="divide-y divide-slate-800/40">
+        {items.length === 0 && (
+          <div
+            className="px-5 py-6 text-center text-xs text-slate-500"
+            style={{ fontFamily: FONT_MONO }}
+          >
+            // ŽÁDNÉ POLOŽKY
+          </div>
+        )}
+
+        {items.map((item) => (
+          <ItemRow
+            key={item.id}
+            item={item}
+            value={values[item.id] || 0}
+            editMode={editMode}
+            onValueChange={(value) => onValueChange(item.id, value)}
+            onUpdate={(updates) => onUpdateItem(item.id, updates)}
+            onDelete={() => onDeleteItem(item.id)}
+          />
+        ))}
+      </div>
+
+      {editMode && (
+        <button
+          onClick={onAddItem}
+          className="w-full px-5 py-2.5 border-t border-cyan-500/15 text-xs uppercase tracking-wider text-cyan-400/70 hover:text-cyan-300 hover:bg-cyan-500/5 transition flex items-center justify-center gap-2"
+          style={{ fontFamily: FONT_MONO }}
+          type="button"
+        >
+          <Plus size={12} /> PŘIDAT POLOŽKU
+        </button>
+      )}
+    </section>
+  );
+}
+
+function ItemRow({
+  item,
+  value,
+  editMode,
+  onValueChange,
+  onUpdate,
+  onDelete,
+}: ItemRowProps) {
+  const [nameValue, setNameValue] = useState<string>(item.name);
+
+  useEffect(() => {
+    setNameValue(item.name);
+  }, [item.name]);
+
+  const vatType =
+    VAT_TYPES.find((vat) => vat.id === item.vatType) || VAT_TYPES[0];
+
+  const showRate =
+    item.vatType !== "reverse_charge" && item.vatType !== "none";
+
+  return (
+    <div className="row-hover flex items-center gap-3 px-5 py-2.5">
+      {editMode ? (
+        <input
+          type="text"
+          value={nameValue}
+          onChange={(event) => setNameValue(event.target.value)}
+          onBlur={() => {
+            const trimmed = nameValue.trim();
+            if (trimmed && trimmed !== item.name) {
+              onUpdate({ name: trimmed });
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") {
+              event.currentTarget.blur();
+            }
+          }}
+          className="num-input flex-1 px-2 py-1.5 text-sm rounded-sm"
+          style={{ fontFamily: FONT_UI }}
+        />
+      ) : (
+        <span className="flex-1 text-sm text-slate-200">{item.name}</span>
+      )}
+
+      {editMode ? (
+        <div className="flex items-center gap-1">
+          <select
+            value={item.vatType}
+            onChange={(event) => {
+              const nextType = event.target.value as VatTypeId;
+              const nextRate =
+                nextType === "reverse_charge" || nextType === "none"
+                  ? 0
+                  : item.vatRate || 21;
+
+              onUpdate({
+                vatType: nextType,
+                vatRate: nextRate,
+              });
+            }}
+            style={{
+              fontFamily: FONT_MONO,
+              fontSize: "11px",
+            }}
+          >
+            {VAT_TYPES.map((vat) => (
+              <option
+                key={vat.id}
+                value={vat.id}
+                style={{ background: "#020617" }}
+              >
+                {vat.short} {vat.label}
+              </option>
+            ))}
+          </select>
+
+          {showRate && (
+            <div className="flex items-center bg-slate-950/60 border border-cyan-500/20 rounded-sm">
+              <input
+                type="number"
+                step="0.5"
+                value={item.vatRate}
+                onChange={(event) =>
+                  onUpdate({
+                    vatRate: Number.parseFloat(event.target.value) || 0,
+                  })
+                }
+                className="w-12 px-1.5 py-1 bg-transparent text-right outline-none"
+                style={{
+                  fontFamily: FONT_MONO,
+                  fontSize: "11px",
+                }}
+              />
+
+              <span className="pr-1.5 text-slate-500 text-[10px]">%</span>
+            </div>
+          )}
+        </div>
+      ) : (
+        <span
+          className="vat-badge"
+          style={{
+            background: `${vatType.color}15`,
+            color: vatType.color,
+            border: `1px solid ${vatType.color}30`,
+          }}
+        >
+          <span>{vatType.short}</span>
+          {showRate && <span>{item.vatRate} %</span>}
+          {!showRate && <span>{vatType.label}</span>}
+        </span>
+      )}
+
+      <div className="flex items-center num-input rounded-sm w-40">
+        <input
+          type="number"
+          inputMode="decimal"
+          value={value || ""}
+          onChange={(event) => onValueChange(event.target.value)}
+          placeholder="0"
+          className="flex-1 px-2 py-1.5 text-right bg-transparent outline-none min-w-0"
+          style={{
+            fontFamily: FONT_MONO,
+            fontSize: "13px",
+            fontWeight: 500,
+            color: "#22D3EE",
+          }}
+        />
+
+        <span className="pr-2.5 text-slate-500 text-xs">Kč</span>
+      </div>
+
+      {editMode && (
+        <button
+          onClick={onDelete}
+          className="p-1.5 text-slate-500 hover:text-rose-400 transition"
+          title="Smazat"
+          type="button"
+        >
+          <X size={14} />
+        </button>
+      )}
+    </div>
+  );
+}
+
+function ResultsPanel({ result }: ResultsPanelProps) {
+  const cashPositive = result.cash >= 0;
+  const kpPositive = result.kp >= 0;
+  const hvPositive = result.provozHV >= 0;
+
+  return (
+    <div className="space-y-4 sticky top-4">
+      <div className="panel relative p-6 overflow-hidden">
+        <span className="corner-bracket tl" />
+        <span className="corner-bracket tr" />
+        <span className="corner-bracket bl" />
+        <span className="corner-bracket br" />
+
+        <div
+          className="absolute inset-0 opacity-30 pointer-events-none"
+          style={{
+            background: cashPositive
+              ? "radial-gradient(ellipse at top right, rgba(34, 211, 238, 0.3), transparent 70%)"
+              : "radial-gradient(ellipse at top right, rgba(244, 114, 182, 0.3), transparent 70%)",
+          }}
+        />
+
+        <div className="relative">
+          <div className="flex items-center gap-2 mb-3">
+            <Zap
+              size={11}
+              className={cashPositive ? "text-cyan-400" : "text-rose-400"}
+            />
+            <p
+              className="text-[10px] uppercase tracking-[0.2em] text-slate-400"
+              style={{ fontFamily: FONT_MONO }}
+            >
+              CASH PROVOZNÍ VÝSLEDEK
+            </p>
+          </div>
+
+          <p
+            style={{
+              fontFamily: FONT_DISPLAY,
+              fontWeight: 600,
+              fontSize: "2.5rem",
+              lineHeight: 1,
+              letterSpacing: "-0.02em",
+            }}
+            className={`${
+              cashPositive
+                ? "text-cyan-300 text-glow-cyan"
+                : "text-rose-400 text-glow-rose"
+            } tabular-nums`}
+          >
+            {cashPositive && "+"}
+            {fmtKc(result.cash)}
+          </p>
+
+          <div
+            className="flex items-center gap-1.5 mt-3 text-[11px] text-slate-400"
+            style={{ fontFamily: FONT_MONO }}
+          >
+            {cashPositive ? (
+              <TrendingUp size={12} className="text-cyan-400" />
+            ) : (
+              <TrendingDown size={12} className="text-rose-400" />
+            )}
+
+            <span>
+              HV {fmtKc(result.provozHV)}{" "}
+              {result.netDPH >= 0 ? "+" : ""}
+              {fmtKc(result.netDPH)} DPH
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="panel relative">
+        <span className="corner-bracket tl" />
+        <span className="corner-bracket tr" />
+        <span className="corner-bracket bl" />
+        <span className="corner-bracket br" />
+
+        <header className="px-5 py-3 border-b border-cyan-500/15">
+          <h3
+            className="text-xs uppercase tracking-[0.15em] text-cyan-300"
+            style={{
+              fontFamily: FONT_DISPLAY,
+              fontWeight: 600,
+            }}
+          >
+            P&amp;L NETTO
+          </h3>
+        </header>
+
+        <dl
+          className="divide-y divide-slate-800/40 px-1"
+          style={{
+            fontFamily: FONT_MONO,
+            fontSize: "12px",
+          }}
+        >
+          <ResultRow label="Tržba income" value={fmtKc(result.income)} muted />
+          {result.refunds > 0 && (
+            <ResultRow label="− Vratky" value={fmtKc(-result.refunds)} muted />
+          )}
+          <ResultRow label="Tržba netto" value={fmtKc(result.trzbaNetto)} bold />
+          <ResultRow label="− COGS" value={fmtKc(-result.cogs)} muted />
+          <ResultRow
+            label="− Logistika"
+            value={fmtKc(-result.logistics)}
+            muted
+          />
+          <ResultRow
+            label="− Marketing"
+            value={fmtKc(-result.marketing)}
+            muted
+          />
+          <ResultRow
+            label="Krycí příspěvek"
+            value={fmtKc(result.kp)}
+            bold
+            accent={kpPositive ? "cyan" : "rose"}
+          />
+          <ResultRow
+            label="↳ KP marže"
+            value={fmtPct(result.kpMarze)}
+            muted
+            small
+          />
+          <ResultRow
+            label="− Fixní náklady"
+            value={fmtKc(-result.fixed)}
+            muted
+          />
+          <ResultRow
+            label="Provozní HV"
+            value={fmtKc(result.provozHV)}
+            bold
+            accent={hvPositive ? "cyan" : "rose"}
+          />
+        </dl>
+      </div>
+
+      <div className="panel relative">
+        <span className="corner-bracket tl" />
+        <span className="corner-bracket tr" />
+        <span className="corner-bracket bl" />
+        <span className="corner-bracket br" />
+
+        <header className="px-5 py-3 border-b border-cyan-500/15">
+          <h3
+            className="text-xs uppercase tracking-[0.15em] text-cyan-300"
+            style={{
+              fontFamily: FONT_DISPLAY,
+              fontWeight: 600,
+            }}
+          >
+            DPH CASH FLOW
+          </h3>
+        </header>
+
+        <dl
+          className="divide-y divide-slate-800/40 px-1"
+          style={{
+            fontFamily: FONT_MONO,
+            fontSize: "12px",
+          }}
+        >
+          {result.outputDPHCZ !== 0 && (
+            <ResultRow
+              label="DPH výstup ČR"
+              value={fmtKc(result.outputDPHCZ)}
+              muted
+              icon={<ArrowUpFromLine size={11} className="text-amber-400" />}
+            />
+          )}
+
+          {result.outputDPHSK !== 0 && (
+            <ResultRow
+              label="DPH výstup SK / OSS"
+              value={fmtKc(result.outputDPHSK)}
+              muted
+              icon={<ArrowUpFromLine size={11} className="text-rose-400" />}
+            />
+          )}
+
+          <ResultRow label="Σ Output DPH" value={fmtKc(result.outputDPH)} muted />
+
+          <ResultRow
+            label="DPH vstup vratitelné"
+            value={fmtKc(result.inputDPH)}
+            muted
+            icon={<ArrowDownToLine size={11} className="text-cyan-400" />}
+          />
+
+          <ResultRow
+            label={result.netDPH >= 0 ? "Vrácení od FÚ" : "Odvod na FÚ"}
+            value={`${result.netDPH >= 0 ? "+" : ""}${fmtKc(result.netDPH)}`}
+            bold
+            accent={result.netDPH >= 0 ? "cyan" : "rose"}
+          />
+        </dl>
       </div>
     </div>
   );
 }
 
-function Row({
+function ResultRow({
   label,
   value,
   bold = false,
@@ -996,37 +1554,289 @@ function Row({
   small = false,
   accent,
   icon,
-}: RowProps) {
+}: ResultRowProps) {
   const accentColor =
-    accent === "emerald"
-      ? "text-emerald-700"
-      : accent === "rose"
-      ? "text-rose-600"
-      : "";
+    accent === "cyan" ? "#22D3EE" : accent === "rose" ? "#F472B6" : undefined;
 
   return (
     <div
-      className={`flex items-center justify-between px-5 ${
+      className={`flex items-center justify-between px-4 ${
         small ? "py-1.5" : "py-2.5"
-      } ${bold ? "bg-stone-50/50" : ""}`}
+      } ${bold ? "bg-cyan-500/[0.03]" : ""}`}
     >
       <span
-        className={`flex items-center gap-2 ${muted ? "text-stone-500" : ""} ${
-          bold ? "font-semibold text-stone-900" : ""
-        } ${small ? "text-xs" : ""}`}
-        style={{ fontFamily: UI }}
+        className={`flex items-center gap-1.5 ${
+          muted ? "text-slate-400" : ""
+        } ${bold ? "text-slate-100 font-semibold" : ""} ${
+          small ? "text-[11px]" : ""
+        }`}
       >
         {icon}
         {label}
       </span>
 
       <span
-        className={`tabular-nums ${bold ? "font-semibold" : ""} ${accentColor} ${
-          small ? "text-xs" : ""
+        className={`tabular-nums ${bold ? "font-semibold" : ""} ${
+          small ? "text-[11px]" : ""
         }`}
+        style={accentColor ? { color: accentColor } : undefined}
       >
         {value}
       </span>
     </div>
+  );
+}
+
+function YearOverview({
+  template,
+  monthlyData,
+  year,
+  selectedMonth,
+  onSelectMonth,
+  isMonthFilled,
+  yearTotals,
+}: YearOverviewProps) {
+  return (
+    <section className="mb-8">
+      <header className="mb-4 flex items-end justify-between">
+        <h2
+          style={{
+            fontFamily: FONT_DISPLAY,
+            fontWeight: 600,
+            fontSize: "1.5rem",
+          }}
+          className="text-slate-200"
+        >
+          <span className="text-cyan-300">▸</span> ROČNÍ PŘEHLED{" "}
+          <span className="text-slate-500">{year}</span>
+        </h2>
+      </header>
+
+      <div className="panel relative overflow-x-auto">
+        <span className="corner-bracket tl" />
+        <span className="corner-bracket tr" />
+        <span className="corner-bracket bl" />
+        <span className="corner-bracket br" />
+
+        <table className="w-full text-sm" style={{ fontFamily: FONT_MONO }}>
+          <thead className="border-b border-cyan-500/15">
+            <tr className="text-[10px] uppercase tracking-wider text-cyan-400/80">
+              <th className="text-left px-4 py-3 font-semibold">Měsíc</th>
+              <th className="text-right px-4 py-3 font-semibold">
+                Tržba netto
+              </th>
+              <th className="text-right px-4 py-3 font-semibold">KP</th>
+              <th className="text-right px-4 py-3 font-semibold">KP %</th>
+              <th className="text-right px-4 py-3 font-semibold">
+                Provozní HV
+              </th>
+              <th className="text-right px-4 py-3 font-semibold">Net DPH</th>
+              <th className="text-right px-4 py-3 font-semibold">CASH</th>
+            </tr>
+          </thead>
+
+          <tbody className="divide-y divide-slate-800/40">
+            {MONTHS.map((month) => {
+              const values = monthlyData[month.idx] || {};
+              const calculated = calculate(template.items, values);
+              const filled = isMonthFilled(month.idx);
+
+              return (
+                <tr
+                  key={month.idx}
+                  onClick={() => onSelectMonth(month.idx)}
+                  className={`cursor-pointer transition row-hover ${
+                    selectedMonth === month.idx ? "bg-cyan-500/[0.06]" : ""
+                  } ${!filled ? "text-slate-600" : "text-slate-300"}`}
+                >
+                  <td
+                    className="px-4 py-2.5 font-medium"
+                    style={{ fontFamily: FONT_UI }}
+                  >
+                    <span className="flex items-center gap-2">
+                      {filled ? (
+                        <span
+                          className="w-1.5 h-1.5 rounded-full bg-emerald-400"
+                          style={{
+                            boxShadow: "0 0 6px rgba(52, 211, 153, 0.6)",
+                          }}
+                        />
+                      ) : (
+                        <span className="w-1.5 h-1.5 rounded-full bg-slate-700" />
+                      )}
+
+                      {month.label}
+
+                      {selectedMonth === month.idx && (
+                        <span className="text-[9px] uppercase text-cyan-400 ml-1">
+                          ◂ AKT
+                        </span>
+                      )}
+                    </span>
+                  </td>
+
+                  <td className="px-4 py-2.5 text-right tabular-nums">
+                    {filled ? fmtKc(calculated.trzbaNetto) : "—"}
+                  </td>
+
+                  <td
+                    className={`px-4 py-2.5 text-right tabular-nums ${
+                      filled && calculated.kp < 0
+                        ? "text-rose-400"
+                        : filled && calculated.kp > 0
+                        ? "text-cyan-300"
+                        : ""
+                    }`}
+                  >
+                    {filled ? fmtKc(calculated.kp) : "—"}
+                  </td>
+
+                  <td
+                    className={`px-4 py-2.5 text-right tabular-nums ${
+                      filled && calculated.kpMarze < 0 ? "text-rose-400" : ""
+                    }`}
+                  >
+                    {filled ? fmtPct(calculated.kpMarze) : "—"}
+                  </td>
+
+                  <td
+                    className={`px-4 py-2.5 text-right tabular-nums ${
+                      filled && calculated.provozHV < 0
+                        ? "text-rose-400"
+                        : filled && calculated.provozHV > 0
+                        ? "text-cyan-300"
+                        : ""
+                    }`}
+                  >
+                    {filled ? fmtKc(calculated.provozHV) : "—"}
+                  </td>
+
+                  <td
+                    className={`px-4 py-2.5 text-right tabular-nums ${
+                      filled && calculated.netDPH > 0
+                        ? "text-cyan-300"
+                        : filled && calculated.netDPH < 0
+                        ? "text-amber-400"
+                        : ""
+                    }`}
+                  >
+                    {filled
+                      ? `${calculated.netDPH >= 0 ? "+" : ""}${fmtKc(
+                          calculated.netDPH
+                        )}`
+                      : "—"}
+                  </td>
+
+                  <td
+                    className={`px-4 py-2.5 text-right tabular-nums font-bold ${
+                      filled && calculated.cash < 0
+                        ? "text-rose-400"
+                        : filled && calculated.cash > 0
+                        ? "text-cyan-300"
+                        : ""
+                    }`}
+                    style={
+                      filled && calculated.cash > 0
+                        ? {
+                            textShadow:
+                              "0 0 12px rgba(34, 211, 238, 0.4)",
+                          }
+                        : filled && calculated.cash < 0
+                        ? {
+                            textShadow:
+                              "0 0 12px rgba(244, 114, 182, 0.3)",
+                          }
+                        : undefined
+                    }
+                  >
+                    {filled ? fmtKc(calculated.cash) : "—"}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+
+          {yearTotals.count > 0 && (
+            <tfoot
+              className="border-t border-cyan-500/30"
+              style={{
+                background:
+                  "linear-gradient(135deg, rgba(34, 211, 238, 0.08), rgba(15, 23, 42, 0.6))",
+              }}
+            >
+              <tr>
+                <td
+                  className="px-4 py-3.5 text-xs uppercase tracking-[0.15em] text-cyan-300 font-bold"
+                  style={{ fontFamily: FONT_DISPLAY }}
+                >
+                  Σ KUMULATIVNĚ
+                </td>
+
+                <td className="px-4 py-3.5 text-right tabular-nums font-semibold text-slate-100">
+                  {fmtKc(yearTotals.trzbaNetto)}
+                </td>
+
+                <td
+                  className={`px-4 py-3.5 text-right tabular-nums font-semibold ${
+                    yearTotals.kp < 0 ? "text-rose-400" : "text-cyan-300"
+                  }`}
+                >
+                  {fmtKc(yearTotals.kp)}
+                </td>
+
+                <td
+                  className={`px-4 py-3.5 text-right tabular-nums font-semibold ${
+                    yearTotals.kpMarze < 0 ? "text-rose-400" : "text-cyan-300"
+                  }`}
+                >
+                  {fmtPct(yearTotals.kpMarze)}
+                </td>
+
+                <td
+                  className={`px-4 py-3.5 text-right tabular-nums font-semibold ${
+                    yearTotals.provozHV < 0
+                      ? "text-rose-400"
+                      : "text-cyan-300"
+                  }`}
+                >
+                  {fmtKc(yearTotals.provozHV)}
+                </td>
+
+                <td
+                  className={`px-4 py-3.5 text-right tabular-nums font-semibold ${
+                    yearTotals.netDPH < 0 ? "text-amber-400" : "text-cyan-300"
+                  }`}
+                >
+                  {`${yearTotals.netDPH >= 0 ? "+" : ""}${fmtKc(
+                    yearTotals.netDPH
+                  )}`}
+                </td>
+
+                <td
+                  className={`px-4 py-3.5 text-right tabular-nums font-bold text-base ${
+                    yearTotals.cash < 0 ? "text-rose-400" : "text-cyan-300"
+                  }`}
+                  style={
+                    yearTotals.cash > 0
+                      ? {
+                          textShadow:
+                            "0 0 16px rgba(34, 211, 238, 0.5)",
+                        }
+                      : yearTotals.cash < 0
+                      ? {
+                          textShadow:
+                            "0 0 16px rgba(244, 114, 182, 0.4)",
+                        }
+                      : undefined
+                  }
+                >
+                  {fmtKc(yearTotals.cash)}
+                </td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </section>
   );
 }
